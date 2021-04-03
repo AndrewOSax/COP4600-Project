@@ -38,7 +38,8 @@ void init(){
     strcpy(aliasTable.name[aliasIndex], "..");
     strcpy(aliasTable.val[aliasIndex], cwd);
     aliasIndex++;
-
+	
+	firstWord = true;
     system("clear");
 };
 
