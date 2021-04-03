@@ -24,14 +24,14 @@ int runUNALIAS(char* name);
 
 cmd_line:
 	BYE {exit(1); return 1;}
-	| CD WORD NEWLINE {runCD($2); return 1;}
-	| CD NEWLINE {runCDhome(); return 1;}
-	| SETENV WORD WORD NEWLINE {runSETENV($2,$3); return 1;}
-	| PRINTENV NEWLINE {runPRINTENV(); return 1;}
-	| UNSETENV WORD NEWLINE {runUNSETENV($2); return 1;}
-	| ALIAS WORD WORD NEWLINE {runALIAS($2,$3); return 1;}
-	| UNALIAS WORD NEWLINE {runUNALIAS($2); return 1;}
-	| ALIAS NEWLINE {runALIASlist(); return 1;}
+	| CD WORD NEWLINE {firstWord = true; runCD($2); return 1;}
+	| CD NEWLINE {firstWord = true; runCDhome(); return 1;}
+	| SETENV WORD WORD NEWLINE {firstWord = true; runSETENV($2,$3); return 1;}
+	| PRINTENV NEWLINE {firstWord = true; runPRINTENV(); return 1;}
+	| UNSETENV WORD NEWLINE {firstWord = true; runUNSETENV($2); return 1;}
+	| ALIAS WORD WORD NEWLINE {firstWord = true; runALIAS($2,$3); return 1;}
+	| UNALIAS WORD NEWLINE {firstWord = true; runUNALIAS($2); return 1;}
+	| ALIAS NEWLINE {firstWord = true; runALIASlist(); return 1;}
 	
 %%
 
@@ -54,10 +54,13 @@ int runCDhome() {
 }
 int runCD(char* dir) {
 	if (dir[0] != '/') { // dir is relative path
-		strcat(varTable.val[0], "/");
-		strcat(varTable.val[0], dir);
-
-		if(chdir(varTable.val[0]) == 0) {
+		char temp[strlen(dir)+strlen(varTable.val[0])+1];
+		strcpy(temp, varTable.val[0]);
+		strcat(temp, "/");
+		strcat(temp, dir);
+		if(chdir(temp) == 0) {
+			strcat(varTable.val[0], "/");
+			strcat(varTable.val[0], dir);
 			strcpy(aliasTable.val[0], varTable.val[0]);
 			strcpy(aliasTable.val[1], varTable.val[0]);
 			char *pointer = strrchr(aliasTable.val[1], '/');
@@ -67,11 +70,6 @@ int runCD(char* dir) {
 			}
 		}
 		else {
-			char *pointer = strrchr(varTable.val[0], '/');
-			while(*pointer != '\0') {
-				*pointer ='\0';
-				pointer++;
-			}
 			printf("Directory not found\n");
 			return 1;
 		}
@@ -89,12 +87,18 @@ int runCD(char* dir) {
 		}
 		else {
 			printf("Directory not found\n");
-                       	return 1;
+            return 1;
 		}
 	}
 	return 1;
 }
 int runSETENV(char* var, char* val){
+	for (int i = 0; i < varIndex; i++) {
+		if(strcmp(varTable.var[i], var) == 0) {
+			strcpy(varTable.val[i], val);
+			return 1;
+		}
+	}
 	strcpy(varTable.var[varIndex], var);
 	strcpy(varTable.val[varIndex], val);
 	varIndex++;
