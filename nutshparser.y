@@ -2,9 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
+#include <string>
+#include <cstring>
 #include "global.h"
-#include <stdbool.h>
 int yylex();
 int yyerror (char* s);
 int runCD(char* dir);
@@ -15,6 +15,9 @@ int runUNSETENV(char* var);
 int runALIASlist();
 int runALIAS(char* name, char* val);
 int runUNALIAS(char* name);
+std::string pathExpand(char* newPath);
+std::string firstExpand(std::string input);
+bool aliasLoop(std::string name, std::string val);
 %}
 
 %union {char* string;}
@@ -41,32 +44,32 @@ int yyerror(char *s) {
 }
 
 int runCDhome() {
-	char* dir = varTable.val[1];
-	strcpy(aliasTable.val[0], dir);
-	strcpy(aliasTable.val[1], dir);
-	strcpy(varTable.val[0], dir);
-	char *pointer = strrchr(aliasTable.val[1], '/');
-	while(*pointer != '\0') {
-		*pointer ='\0';
-		pointer++;
+	varTable["PWD"] = varTable["HOME"];
+	aliasTable["."] = varTable["PWD"];
+	int found = varTable["PWD"].rfind("/");
+	if (found != -1){
+		aliasTable[".."] = varTable["PWD"].substr(0,found);
+	}
+	else{
+		aliasTable[".."] = "";
 	}
 	return 1;
 }
 int runCD(char* dir) {
+	if (std::string(dir).compare("") == 0){
+		return 1;
+	}
 	if (dir[0] != '/') { // dir is relative path
-		char temp[strlen(dir)+strlen(varTable.val[0])+1];
-		strcpy(temp, varTable.val[0]);
-		strcat(temp, "/");
-		strcat(temp, dir);
-		if(chdir(temp) == 0) {
-			strcat(varTable.val[0], "/");
-			strcat(varTable.val[0], dir);
-			strcpy(aliasTable.val[0], varTable.val[0]);
-			strcpy(aliasTable.val[1], varTable.val[0]);
-			char *pointer = strrchr(aliasTable.val[1], '/');
-			while(*pointer != '\0') {
-				*pointer ='\0';
-				pointer++;
+		std::string path = varTable["PWD"] + "/" + std::string(dir);
+		if(chdir(path.c_str()) == 0) {
+			varTable["PWD"] += "/" + std::string(dir);
+			aliasTable["."] = varTable["PWD"];
+			int found = varTable["PWD"].rfind("/");
+			if (found != -1){
+				aliasTable[".."] = varTable["PWD"].substr(0,found);
+			}
+			else{
+				aliasTable[".."] = "";
 			}
 		}
 		else {
@@ -76,13 +79,14 @@ int runCD(char* dir) {
 	}
 	else { // dir is absolute path
 		if(chdir(dir) == 0){
-			strcpy(aliasTable.val[0], dir);
-			strcpy(aliasTable.val[1], dir);
-			strcpy(varTable.val[0], dir);
-			char *pointer = strrchr(aliasTable.val[1], '/');
-			while(*pointer != '\0') {
-				*pointer ='\0';
-				pointer++;
+			varTable["PWD"] = std::string(dir);
+			aliasTable["."] = varTable["PWD"];
+			int found = varTable["PWD"].rfind("/");
+			if (found != -1){
+				aliasTable[".."] = varTable["PWD"].substr(0,found);
+			}
+			else{
+				aliasTable[".."] = "";
 			}
 		}
 		else {
@@ -92,22 +96,53 @@ int runCD(char* dir) {
 	}
 	return 1;
 }
-int runSETENV(char* var, char* val){
-	for (int i = 0; i < varIndex; i++) {
-		if(strcmp(varTable.var[i], var) == 0) {
-			strcpy(varTable.val[i], val);
-			return 1;
-		}
+std::string firstExpand(std::string input){
+	if (input.size() != 0 && input[0] == '~'){
+		std::string output = varTable["HOME"];
+		output += input.substr(1,input.size()-1);
+		return output;
 	}
-	strcpy(varTable.var[varIndex], var);
-	strcpy(varTable.val[varIndex], val);
-	varIndex++;
+	else if (input.size() > 1 && input[0] == '.' && input[1] == '.'){
+		std::string output = aliasTable[".."];
+		output += input.substr(2,input.size()-2);
+		return output;
+	}
+	else if (input.size() != 0 && input[0] == '.'){
+		std::string output = aliasTable["."];
+		output += input.substr(1,input.size()-1);
+		return output;
+	}
+	else{
+		return input;
+	}
+}
+std::string pathExpand(char* newPath){
+	std::string output = std::string(newPath);
+	int oldPos = 0;
+	int pos = output.find(":");
+	while (pos != -1){
+		int shift = output.size();
+		output.replace(oldPos,pos-oldPos,firstExpand(output.substr(oldPos,pos-oldPos)));
+		shift = output.size()-shift;
+		oldPos = pos+1+shift;
+		pos = output.find(":",pos+1+shift);	
+	}
+	output.replace(oldPos,output.size()-oldPos,firstExpand(output.substr(oldPos,output.size())));
+	return output;
+}
+int runSETENV(char* var, char* val){
+	if (strcmp(var, "PATH") == 0){
+		varTable["PATH"] = pathExpand(val);
+	}
+	else{
+		varTable[std::string(var)] = std::string(val);
+	}	
 	
 	return 1;
 }
 int runPRINTENV(){
-	for (int i = 0; i < varIndex; i++) {
-		printf("%s=%s\n",varTable.var[i],varTable.val[i]);
+	for (auto i = varTable.begin(); i != varTable.end(); i++) {
+		printf("%s=%s\n",i->first.c_str(),i->second.c_str());
 	}
 	return 1;
 }
@@ -115,61 +150,39 @@ int runUNSETENV(char* var){
 	if (strcmp(var,"PWD") == 0 || strcmp(var,"HOME") == 0 || strcmp(var,"PROMPT") == 0 || strcmp(var,"PATH") == 0){
 		return 1;
 	}
-	bool found = false;
-	for (int i = 0; i < varIndex; i++) {
-		if (found){
-			strcpy(varTable.var[i-1],varTable.var[i]);
-			strcpy(varTable.val[i-1],varTable.val[i]);
-		}
-		if (strcmp(varTable.var[i],var) == 0){
-			found = true;
-		}		
-	}
-	if (found){
-		varIndex--;
-	}
+	varTable.erase(std::string(var));
 	return 1;
 }
 int runALIASlist(){
-	for (int i = 0; i < aliasIndex; i++) {
-		printf("%s=%s\n",aliasTable.name[i],aliasTable.val[i]);
+	for (auto i = aliasTable.begin(); i != aliasTable.end(); i++) {
+		printf("%s=%s\n",i->first.c_str(),i->second.c_str());
 	}
 	return 1;
 }
+bool aliasLoop(std::string name, std::string val){
+/*	int start = 0;
+	int end = val.find(" \t");
+	while (end != -1){
+		aliasTable.find(val.substr(start,end-start));
+		if (find != aliasTable.end()){
+			
+		}
+		else{
+		
+		}
+	}*/
+	return false;
+}
 int runALIAS(char* name, char* val){
-	for (int i = 0; i < aliasIndex; i++) {
-		if(strcmp(name, val) == 0){
-			printf("Error, expansion of \"%s\" would create a loop.\n", name);
-			return 1;
-		}
-		else if((strcmp(aliasTable.name[i], name) == 0) && (strcmp(aliasTable.val[i], val) == 0)){
-			printf("Error, expansion of \"%s\" would create a loop.\n", name);
-			return 1;
-		}
-		else if(strcmp(aliasTable.name[i], name) == 0) {
-			strcpy(aliasTable.val[i], val);
-			return 1;
-		}
+	if(strcmp(name, val) == 0 || aliasLoop(std::string(name),std::string(val))){
+		printf("Error, expansion of \"%s\" would create a loop.\n", name);
 	}
-	strcpy(aliasTable.name[aliasIndex], name);
-	strcpy(aliasTable.val[aliasIndex], val);
-	aliasIndex++;
-	
+	else{
+		aliasTable[std::string(name)] = std::string(val);	
+	}
 	return 1;
 }
 int runUNALIAS(char* name){
-	bool found = false;
-	for (int i = 0; i < aliasIndex; i++) {
-		if (found){
-			strcpy(aliasTable.name[i-1],aliasTable.name[i]);
-			strcpy(aliasTable.val[i-1],aliasTable.val[i]);
-		}
-		if (strcmp(aliasTable.name[i],name) == 0){
-			found = true;
-		}		
-	}
-	if (found){
-		aliasIndex--;
-	}
+	aliasTable.erase(std::string(name));
 	return 1;
 }
