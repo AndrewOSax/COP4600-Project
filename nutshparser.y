@@ -17,7 +17,6 @@ int runALIAS(char* name, char* val);
 int runUNALIAS(char* name);
 std::string pathExpand(char* newPath);
 std::string firstExpand(std::string input);
-bool aliasLoop(std::string name, std::string val);
 %}
 
 %union {char* string;}
@@ -35,7 +34,10 @@ cmd_line:
 	| ALIAS WORD WORD NEWLINE {firstWord = true; runALIAS($2,$3); return 1;}
 	| UNALIAS WORD NEWLINE {firstWord = true; runUNALIAS($2); return 1;}
 	| ALIAS NEWLINE {firstWord = true; runALIASlist(); return 1;}
-	
+	| other {return 1;}
+
+other:
+	WORD NEWLINE{firstWord = true; printf("%s\n",$1); return 1;}
 %%
 
 int yyerror(char *s) {
@@ -159,26 +161,22 @@ int runALIASlist(){
 	}
 	return 1;
 }
-bool aliasLoop(std::string name, std::string val){
-/*	int start = 0;
-	int end = val.find(" \t");
-	while (end != -1){
-		aliasTable.find(val.substr(start,end-start));
-		if (find != aliasTable.end()){
-			
-		}
-		else{
-		
-		}
-	}*/
-	return false;
-}
 int runALIAS(char* name, char* val){
-	if(strcmp(name, val) == 0 || aliasLoop(std::string(name),std::string(val))){
+	std::string names = std::string(name);
+	std::string vals = std::string(val);
+	int end = vals.find_first_of(" \t");
+	if (end == -1){
+		end = vals.size();
+	}
+	if(names.compare(vals.substr(0,end)) == 0){
 		printf("Error, expansion of \"%s\" would create a loop.\n", name);
 	}
 	else{
-		aliasTable[std::string(name)] = std::string(val);	
+		auto iter = aliasTable.find(vals.substr(0,end));
+		if (iter != aliasTable.end()){
+			vals.replace(0,end,iter->second);
+		}
+		aliasTable[names] = vals;	
 	}
 	return 1;
 }
