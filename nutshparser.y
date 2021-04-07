@@ -5,6 +5,8 @@
 #include <string>
 #include <cstring>
 #include "global.h"
+#include <dirent.h>
+#include <vector>
 int yylex();
 int yyerror (char* s);
 int runCD(char* dir);
@@ -16,12 +18,14 @@ int runALIASlist();
 int runALIAS(char* name, char* val);
 int runUNALIAS(char* name);
 std::string pathExpand(char* newPath);
-std::string firstExpand(std::string input);
+std::string firstExpand(std::string input, bool pathParsing);
+int runOtherCommand(char* cmd);
+std::vector<std::string> argList;
 %}
 
 %union {char* string;}
 %start cmd_line
-%token <string> WORD BYE CD ALIAS SETENV PRINTENV UNSETENV UNALIAS PATH HOME NEWLINE META NUMBER_LITERAL BOOLEAN_LITERAL NULL_LITERAL
+%token <string> WORD BYE CD ALIAS SETENV PRINTENV UNSETENV UNALIAS PATH HOME NEWLINE META
 %%
 
 cmd_line:
@@ -34,10 +38,16 @@ cmd_line:
 	| ALIAS WORD WORD NEWLINE {firstWord = true; runALIAS($2,$3); return 1;}
 	| UNALIAS WORD NEWLINE {firstWord = true; runUNALIAS($2); return 1;}
 	| ALIAS NEWLINE {firstWord = true; runALIASlist(); return 1;}
-	| other {return 1;}
+	| other {firstWord = true; return 1;}
 
 other:
-	WORD NEWLINE{firstWord = true; printf("%s\n",$1); return 1;}
+	command NEWLINE {}
+command:
+	WORD args {runOtherCommand($1); argList.clear();}
+args:
+	%empty
+	| args WORD {argList.push_back(std::string($2));}
+	
 %%
 
 int yyerror(char *s) {
@@ -58,13 +68,14 @@ int runCDhome() {
 	return 1;
 }
 int runCD(char* dir) {
-	if (std::string(dir).compare("") == 0){
+	std::string dirExpand = firstExpand(std::string(dir),false);
+	if (dirExpand.compare("") == 0){
 		return 1;
 	}
-	if (dir[0] != '/') { // dir is relative path
-		std::string path = varTable["PWD"] + "/" + std::string(dir);
+	if (dirExpand[0] != '/') { // dir is relative path
+		std::string path = varTable["PWD"] + "/" + dirExpand;
 		if(chdir(path.c_str()) == 0) {
-			varTable["PWD"] += "/" + std::string(dir);
+			varTable["PWD"] += "/" + dirExpand;
 			aliasTable["."] = varTable["PWD"];
 			int found = varTable["PWD"].rfind("/");
 			if (found != -1){
@@ -80,8 +91,8 @@ int runCD(char* dir) {
 		}
 	}
 	else { // dir is absolute path
-		if(chdir(dir) == 0){
-			varTable["PWD"] = std::string(dir);
+		if(chdir(dirExpand.c_str()) == 0){
+			varTable["PWD"] = dirExpand;
 			aliasTable["."] = varTable["PWD"];
 			int found = varTable["PWD"].rfind("/");
 			if (found != -1){
@@ -98,18 +109,18 @@ int runCD(char* dir) {
 	}
 	return 1;
 }
-std::string firstExpand(std::string input){
+std::string firstExpand(std::string input,bool pathParsing){
 	if (input.size() != 0 && input[0] == '~'){
 		std::string output = varTable["HOME"];
 		output += input.substr(1,input.size()-1);
 		return output;
 	}
-	else if (input.size() > 1 && input[0] == '.' && input[1] == '.'){
+	else if (!pathParsing && input.size() > 1 && input[0] == '.' && input[1] == '.'){
 		std::string output = aliasTable[".."];
 		output += input.substr(2,input.size()-2);
 		return output;
 	}
-	else if (input.size() != 0 && input[0] == '.'){
+	else if (!pathParsing && input.size() != 0 && input[0] == '.'){
 		std::string output = aliasTable["."];
 		output += input.substr(1,input.size()-1);
 		return output;
@@ -122,14 +133,21 @@ std::string pathExpand(char* newPath){
 	std::string output = std::string(newPath);
 	int oldPos = 0;
 	int pos = output.find(":");
+	bool dotFound = false;
 	while (pos != -1){
 		int shift = output.size();
-		output.replace(oldPos,pos-oldPos,firstExpand(output.substr(oldPos,pos-oldPos)));
+		if (output.substr(oldPos,pos-oldPos).compare(".") == 0 || output.substr(oldPos,pos-oldPos).compare(aliasTable["."]) == 0){
+			dotFound = true;
+		}
+		output.replace(oldPos,pos-oldPos,firstExpand(output.substr(oldPos,pos-oldPos),true));
 		shift = output.size()-shift;
 		oldPos = pos+1+shift;
 		pos = output.find(":",pos+1+shift);	
 	}
-	output.replace(oldPos,output.size()-oldPos,firstExpand(output.substr(oldPos,output.size())));
+	output.replace(oldPos,output.size()-oldPos,firstExpand(output.substr(oldPos,output.size()),true));
+	if (!dotFound){
+		output += ":.";
+	}
 	return output;
 }
 int runSETENV(char* var, char* val){
@@ -182,5 +200,75 @@ int runALIAS(char* name, char* val){
 }
 int runUNALIAS(char* name){
 	aliasTable.erase(std::string(name));
+	return 1;
+}
+int runOtherCommand(char* cmd){
+	if (cmd[0] != '/') { // cmd is relative path
+		struct dirent *entry = nullptr;
+		DIR *dp = nullptr;
+		int oldPos = 0;
+		int pos = varTable["PATH"].find(":");
+		while (pos != -1){ //loop through PATH and return matches
+			dp = opendir(varTable["PATH"].substr(oldPos,pos-oldPos).c_str());
+			if (dp != nullptr) {
+				while ((entry = readdir(dp))){
+					std::string fileName = std::string(entry->d_name);
+					if(fileName.compare(std::string(cmd)) == 0){
+						char* args[argList.size()+2];
+						args[0] = strdup((varTable["PATH"].substr(oldPos,pos-oldPos)+"/"+fileName).c_str());
+						for (int i = 1; i < argList.size()+1; i++){
+							args[i] = strdup(argList[i-1].c_str());
+						}
+						args[argList.size()+1] = NULL;
+						execv(args[0],args);
+						return 1;
+					}			
+				}
+			}
+			closedir(dp);
+			oldPos = pos+1;
+			pos = varTable["PATH"].find(":",pos+1);	
+		}
+		dp = opendir(varTable["PATH"].substr(oldPos,varTable["PATH"].size()).c_str());
+		if (dp != nullptr) {
+			while ((entry = readdir(dp))){
+				std::string fileName = std::string(entry->d_name);
+				if(fileName.compare(std::string(cmd)) == 0){
+					char* args[argList.size()+2];
+					args[0] = strdup((varTable["PATH"].substr(oldPos,varTable["PATH"].size())+"/"+fileName).c_str());
+					for (int i = 1; i < argList.size()+1; i++){
+						args[i] = strdup(argList[i-1].c_str());
+					}
+					args[argList.size()+1] = NULL;
+					execv(args[0],args);
+					return 1;
+				}		
+			}
+		}
+		closedir(dp);
+		printf("Error: command \"%s\" not found\n",cmd);
+	}
+	else{
+		int pos = std::string(cmd).rfind("/");
+		struct dirent *entry = nullptr;
+		DIR *dp = nullptr;
+		dp = opendir(std::string(cmd).substr(0,pos).c_str());
+		if (dp != nullptr) {
+			while ((entry = readdir(dp))){
+				std::string fileName = std::string(entry->d_name);
+				if(fileName.compare(std::string(cmd).substr(pos+1,std::string(cmd).size())) == 0){
+					char* args[argList.size()+2];
+					args[0] = cmd;
+					for (int i = 1; i < argList.size()+1; i++){
+						args[i] = strdup(argList[i-1].c_str());
+					}
+					args[argList.size()+1] = NULL;
+					execv(args[0],args);
+					return 1;
+				}
+			}
+		}
+		printf("Error: command \"%s\" not found\n",cmd);
+	}
 	return 1;
 }
