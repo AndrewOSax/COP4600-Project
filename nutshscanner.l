@@ -2,6 +2,7 @@
 #include "nutshparser.tab.h"
 #include <string>
 #include "global.h"
+#include <dirent.h>
 //#define unput(c) {yytchar= (c); if(yytchar=='\n') {yylineno--; *yysptr++=yytchar;}
 std::string envExpand(std::string input){
 	bool scanName = false;
@@ -35,26 +36,105 @@ std::string envExpand(std::string input){
 	}
 	return output;
 }
+bool wildCardMatch(std::string file,std::string pattern){ //https://www.geeksforgeeks.org/wildcard-pattern-matching/
+    int n = file.size();
+	int m = pattern.size();
+	if (m == 0){
+        return (n == 0);
+	}
+    bool lookup[n + 1][m + 1]; 
+    memset(lookup, false, sizeof(lookup));	
+    lookup[0][0] = true; 	
+    for (int j = 1; j <= m; j++){
+        if (pattern[j - 1] == '*'){
+            lookup[0][j] = lookup[0][j - 1];
+		}
+	}
+    for (int i = 1; i <= n; i++) {
+        for (int j = 1; j <= m; j++) {
+            if (pattern[j - 1] == '*'){
+                lookup[i][j] = lookup[i][j - 1] || lookup[i - 1][j];
+			}
+            else if (pattern[j - 1] == '?' || file[i - 1] == pattern[j - 1]){
+                lookup[i][j] = lookup[i - 1][j - 1];
+			}
+            else{
+                lookup[i][j] = false;
+			}
+        }
+    } 
+    return lookup[n][m];
+}
 std::string wildCards(std::string input){
-	return input;
+	bool wild = false;
+	for (int i = 0; i < input.size(); i++){ 
+		if (input[i] == '*' || input[i] == '?'){
+			wild = true;
+		}
+		if (i > 0 && input[i-1] == '*' && input[i] == '*'){ //delete extra asterisks to save time
+			input.erase(i,1);
+			i--;
+		}
+	}
+	if (!wild){
+		return input;
+	}
+	std::string output = "";
+	struct dirent *entry = nullptr;
+    DIR *dp = nullptr;
+	int oldPos = 0;
+	int pos = varTable["PATH"].find(":");
+	while (pos != -1){ //loop through PATH and return matches
+		dp = opendir(varTable["PATH"].substr(oldPos,pos-oldPos).c_str());
+		if (dp != nullptr) {
+			while ((entry = readdir(dp))){
+				std::string fileName = std::string(entry->d_name);
+				if(wildCardMatch(fileName,input)){
+					output += fileName + " ";
+				}			
+			}
+		}
+		closedir(dp);
+		oldPos = pos+1;
+		pos = varTable["PATH"].find(":",pos+1);	
+	}
+	dp = opendir(varTable["PATH"].substr(oldPos,varTable["PATH"].size()).c_str());
+	if (dp != nullptr) {
+		while ((entry = readdir(dp))){
+			std::string fileName = std::string(entry->d_name);
+			if(wildCardMatch(fileName,input)){
+				output += fileName + " ";
+			}		
+		}
+	}
+	closedir(dp);
+	if (output.size() == 0){ //if no matches remove wildcards and return
+		for (int i = 0; i < input.size(); i++){ 
+			if (input[i] != '*' && input[i] != '?'){
+				output += input[i];
+			}
+		}
+	}
+	else{ //remove last space
+		output = output.substr(0,output.size()-1);
+	}
+    return output;
 }
 std::string parseWords(char* text){
 	std::string input = std::string(text);
-	input = envExpand(input);
-	if (firstWord){
+	input = envExpand(input); //repalce all env fields
+	if (firstWord){ //alias if first word in command
 		auto iter = aliasTable.find(input);
 		if (iter != aliasTable.end()){
 			input = iter->second;
 		}
 	}
-	return wildCards(input);
+	return wildCards(input); //match wildcard characters
 }
 //{DIGIT}+\.{DIGIT}+	{firstWord = false; return NUMBER_LITERAL;}
 //{DIGIT}+ {firstWord = false; return NUMBER_LITERAL;}
 //true|false	{firstWord = false; return BOOLEAN_LITERAL;}
 //null	{firstWord = false; return NULL_LITERAL;}
-//
-//{META}	{firstWord = false; return META;}
 %}
 %array
 %option noyywrap
@@ -123,6 +203,8 @@ unsetenv {if (firstWord){firstWord = false; return UNSETENV;} else{yylval.string
 cd {if (firstWord){firstWord = false; return CD;} else{yylval.string = strdup(yytext); return WORD;}}
 alias {if (firstWord){firstWord = false; return ALIAS;} else{yylval.string = strdup(yytext); return WORD;}}
 unalias {if (firstWord){firstWord = false; return UNALIAS;} else{yylval.string = strdup(yytext); return WORD;}}
+
+{META}	{firstWord = false; return META;}
 
 {CHAR}+ {
 		 char* orig = strdup(yytext);
