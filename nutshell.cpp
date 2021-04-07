@@ -18,7 +18,7 @@ void init(){
 	varTable.emplace("PWD",pwd);
 	varTable.emplace("HOME",pwd);
     varTable.emplace("PROMPT","nutshell");
-	varTable.emplace("PATH",pwd+":/bin");
+	varTable.emplace("PATH",".:/bin");
 
 	aliasTable.emplace(".",pwd);
 	int found = pwd.rfind("/");
