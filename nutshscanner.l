@@ -190,9 +190,17 @@ CHAR [^ \t\n<>|\\&"]
 <expect_string>[\"]	{ BEGIN(INITIAL);}
 
 ~ {firstWord = false; yylval.string = strdup(varTable["HOME"].c_str()); return WORD;}
-"." {firstWord = false; yylval.string = strdup(aliasTable["."].c_str()); return WORD;}
 ".." {firstWord = false; yylval.string = strdup(aliasTable[".."].c_str()); return WORD;}
+"." {firstWord = false; yylval.string = strdup(aliasTable["."].c_str()); return WORD;}
 {NL}	return NEWLINE;
+
+"|" return BASIC_PIPE;
+"<" return PIPE_IN;
+">>" return PIPE_OUT_OUT;
+"2>" return PIPE_ERR;
+"2>&1" return PIPE_ERR_OUT;
+">" return PIPE_OUT;
+"&" return AND;
 
 {WHITE}+ { }
 bye {if (firstWord){firstWord = false; return BYE;} else{yylval.string = strdup(yytext); return WORD;}}
