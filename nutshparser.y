@@ -7,6 +7,7 @@
 #include "global.h"
 #include <dirent.h>
 #include <vector>
+#include <sys/wait.h>
 int yylex();
 int yyerror (char* s);
 int runCD(char* dir);
@@ -192,7 +193,18 @@ int runALIAS(char* name, char* val){
 	else{
 		auto iter = aliasTable.find(vals.substr(0,end));
 		if (iter != aliasTable.end()){
-			vals.replace(0,end,iter->second);
+			std::string alias = iter->second;
+			int enda = alias.find_first_of(" \t");
+			if (enda == -1){
+				enda = alias.size();
+			}
+			if(names.compare(alias.substr(0,enda)) == 0){
+				printf("Error, expansion of \"%s\" would create a loop.\n", name);
+				return 1;
+			}
+			else{
+				vals.replace(0,end,alias);
+			}			
 		}
 		aliasTable[names] = vals;	
 	}
@@ -214,13 +226,24 @@ int runOtherCommand(char* cmd){
 				while ((entry = readdir(dp))){
 					std::string fileName = std::string(entry->d_name);
 					if(fileName.compare(std::string(cmd)) == 0){
+						int status;
 						char* args[argList.size()+2];
 						args[0] = strdup((varTable["PATH"].substr(oldPos,pos-oldPos)+"/"+fileName).c_str());
 						for (int i = 1; i < argList.size()+1; i++){
 							args[i] = strdup(argList[i-1].c_str());
 						}
 						args[argList.size()+1] = NULL;
-						execv(args[0],args);
+						pid_t p = fork();
+						if (p < 0){
+							fprintf(stderr, "fork Failed" );
+							return 1;
+						}
+						else if (p == 0){
+							execv(args[0],args);
+						}	
+						else{
+							wait(&status);
+						}						
 						return 1;
 					}			
 				}
@@ -234,13 +257,24 @@ int runOtherCommand(char* cmd){
 			while ((entry = readdir(dp))){
 				std::string fileName = std::string(entry->d_name);
 				if(fileName.compare(std::string(cmd)) == 0){
+					int status;
 					char* args[argList.size()+2];
 					args[0] = strdup((varTable["PATH"].substr(oldPos,varTable["PATH"].size())+"/"+fileName).c_str());
 					for (int i = 1; i < argList.size()+1; i++){
 						args[i] = strdup(argList[i-1].c_str());
 					}
 					args[argList.size()+1] = NULL;
-					execv(args[0],args);
+					pid_t p = fork();
+					if (p < 0){
+						fprintf(stderr, "fork Failed" );
+						return 1;
+					}
+					else if (p == 0){
+						execv(args[0],args);
+					}	
+					else{
+						wait(&status);
+					}
 					return 1;
 				}		
 			}
@@ -257,13 +291,24 @@ int runOtherCommand(char* cmd){
 			while ((entry = readdir(dp))){
 				std::string fileName = std::string(entry->d_name);
 				if(fileName.compare(std::string(cmd).substr(pos+1,std::string(cmd).size())) == 0){
+					int status;
 					char* args[argList.size()+2];
 					args[0] = cmd;
 					for (int i = 1; i < argList.size()+1; i++){
 						args[i] = strdup(argList[i-1].c_str());
 					}
 					args[argList.size()+1] = NULL;
-					execv(args[0],args);
+					pid_t p = fork();
+					if (p < 0){
+						fprintf(stderr, "fork Failed" );
+						return 1;
+					}
+					else if (p == 0){
+						execv(args[0],args);
+					}
+					else{
+						wait(&status);
+					}
 					return 1;
 				}
 			}
