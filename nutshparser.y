@@ -20,13 +20,22 @@ int runALIAS(char* name, char* val);
 int runUNALIAS(char* name);
 std::string pathExpand(char* newPath);
 std::string firstExpand(std::string input, bool pathParsing);
-int runOtherCommand(char* cmd);
-std::vector<std::string> argList;
+int executeCommand(std::vector<std::string> &command);
+int runOtherCommand();
+void clearOtherCommand();
+std::vector<std::string> commandList;
+std::vector<std::string> pipeCommandList;
+std::vector<std::vector<std::string>> pipeList;
+std::string stdinFile;
+std::string stdoutFile;
+bool stdoutAppend;
+std::string stderrFile;
+bool background;
 %}
 
 %union {char* string;}
 %start cmd_line
-%token <string> WORD BYE CD ALIAS SETENV PRINTENV UNSETENV UNALIAS PATH HOME NEWLINE META
+%token <string> WORD BYE CD ALIAS SETENV PRINTENV UNSETENV UNALIAS NEWLINE META BASIC_PIPE PIPE_IN PIPE_OUT PIPE_OUT_OUT PIPE_ERR PIPE_ERR_OUT AND
 %%
 
 cmd_line:
@@ -40,23 +49,64 @@ cmd_line:
 	| UNALIAS WORD NEWLINE {firstWord = true; runUNALIAS($2); return 1;}
 	| ALIAS NEWLINE {firstWord = true; runALIASlist(); return 1;}
 	| other {firstWord = true; return 1;}
+	;
 
 other:
-	command NEWLINE {}
+	command pipes pipein pipeout pipeerr wait {runOtherCommand(); clearOtherCommand();}
+	;
 command:
-	WORD args {runOtherCommand($1); argList.clear();}
+	WORD args {commandList.insert(commandList.begin(),std::string($1));}
+	;
 args:
 	%empty
-	| args WORD {argList.push_back(std::string($2));}
-	
+	| args WORD {commandList.push_back(std::string($2));}
+	;
+pipes:
+	%empty
+	| pipes BASIC_PIPE command_pipe {pipeList.push_back(pipeCommandList);pipeCommandList.clear();}
+	;
+command_pipe:
+	WORD args_pipe {pipeCommandList.insert(pipeCommandList.begin(),std::string($1));}
+	;
+args_pipe:
+	%empty
+	| args_pipe WORD {pipeCommandList.push_back(std::string($2));}
+	;
+pipein:
+	%empty
+	| PIPE_IN WORD {stdinFile = std::string($2);}
+	;
+pipeout:
+	%empty
+	| PIPE_OUT WORD {stdoutFile = std::string($2); stdoutAppend = false;}
+	| PIPE_OUT_OUT WORD {stdoutFile = std::string($2); stdoutAppend = true;}
+	;
+pipeerr:
+	%empty
+	| PIPE_ERR WORD {stderrFile = std::string($2);}
+	| PIPE_ERR_OUT {stderrFile = "STDOUT";}
+	;
+wait:
+	%empty
+	| AND {background = true;}
+	;
 %%
-
-int yyerror(char *s) {
+void clearOtherCommand(){
+	commandList.clear();
+	pipeCommandList.clear();
+	pipeList.clear();
+	stdinFile.clear();
+	stdoutFile.clear();
+	stderrFile.clear();
+	stdoutAppend = false;
+	background = false;
+}
+int yyerror(char *s){
 	printf("%s\n",s);
 	return 0;
 }
 
-int runCDhome() {
+int runCDhome(){ //cd with no args passed
 	varTable["PWD"] = varTable["HOME"];
 	aliasTable["."] = varTable["PWD"];
 	int found = varTable["PWD"].rfind("/");
@@ -68,7 +118,7 @@ int runCDhome() {
 	}
 	return 1;
 }
-int runCD(char* dir) {
+int runCD(char* dir){
 	std::string dirExpand = firstExpand(std::string(dir),false);
 	if (dirExpand.compare("") == 0){
 		return 1;
@@ -86,7 +136,7 @@ int runCD(char* dir) {
 				aliasTable[".."] = "";
 			}
 		}
-		else {
+		else{
 			printf("Directory not found\n");
 			return 1;
 		}
@@ -103,14 +153,14 @@ int runCD(char* dir) {
 				aliasTable[".."] = "";
 			}
 		}
-		else {
+		else{
 			printf("Directory not found\n");
             return 1;
 		}
 	}
 	return 1;
 }
-std::string firstExpand(std::string input,bool pathParsing){
+std::string firstExpand(std::string input,bool pathParsing){ //Tilde, dot, and dotdot expansion
 	if (input.size() != 0 && input[0] == '~'){
 		std::string output = varTable["HOME"];
 		output += input.substr(1,input.size()-1);
@@ -130,7 +180,7 @@ std::string firstExpand(std::string input,bool pathParsing){
 		return input;
 	}
 }
-std::string pathExpand(char* newPath){
+std::string pathExpand(char* newPath){ //Tilde expand PATH variable
 	std::string output = std::string(newPath);
 	int oldPos = 0;
 	int pos = output.find(":");
@@ -146,19 +196,18 @@ std::string pathExpand(char* newPath){
 		pos = output.find(":",pos+1+shift);	
 	}
 	output.replace(oldPos,output.size()-oldPos,firstExpand(output.substr(oldPos,output.size()),true));
-	if (!dotFound){
+	if (!dotFound){ //Add home if not present
 		output += ":.";
 	}
 	return output;
 }
 int runSETENV(char* var, char* val){
-	if (strcmp(var, "PATH") == 0){
+	if (strcmp(var, "PATH") == 0){ //PATH is special
 		varTable["PATH"] = pathExpand(val);
 	}
 	else{
 		varTable[std::string(var)] = std::string(val);
-	}	
-	
+	}
 	return 1;
 }
 int runPRINTENV(){
@@ -214,8 +263,8 @@ int runUNALIAS(char* name){
 	aliasTable.erase(std::string(name));
 	return 1;
 }
-int runOtherCommand(char* cmd){
-	if (cmd[0] != '/') { // cmd is relative path
+int executeCommand(std::vector<std::string> &command){
+	if (command[0][0] != '/') { // cmd is relative path
 		struct dirent *entry = nullptr;
 		DIR *dp = nullptr;
 		int oldPos = 0;
@@ -225,14 +274,14 @@ int runOtherCommand(char* cmd){
 			if (dp != nullptr) {
 				while ((entry = readdir(dp))){
 					std::string fileName = std::string(entry->d_name);
-					if(fileName.compare(std::string(cmd)) == 0){
+					if(fileName.compare(command[0]) == 0){
 						int status;
-						char* args[argList.size()+2];
+						char* args[command.size()+1];
 						args[0] = strdup((varTable["PATH"].substr(oldPos,pos-oldPos)+"/"+fileName).c_str());
-						for (int i = 1; i < argList.size()+1; i++){
-							args[i] = strdup(argList[i-1].c_str());
+						for (int i = 1; i < command.size(); i++){
+							args[i] = strdup(command[i].c_str());
 						}
-						args[argList.size()+1] = NULL;
+						args[command.size()] = NULL;
 						pid_t p = fork();
 						if (p < 0){
 							fprintf(stderr, "fork Failed" );
@@ -240,12 +289,13 @@ int runOtherCommand(char* cmd){
 						}
 						else if (p == 0){
 							execv(args[0],args);
-						}	
+							exit(0);
+						}
 						else{
 							wait(&status);
-						}						
+						}
 						return 1;
-					}			
+					}
 				}
 			}
 			closedir(dp);
@@ -256,55 +306,22 @@ int runOtherCommand(char* cmd){
 		if (dp != nullptr) {
 			while ((entry = readdir(dp))){
 				std::string fileName = std::string(entry->d_name);
-				if(fileName.compare(std::string(cmd)) == 0){
+				if(fileName.compare(command[0]) == 0){
 					int status;
-					char* args[argList.size()+2];
+					char* args[command.size()+1];
 					args[0] = strdup((varTable["PATH"].substr(oldPos,varTable["PATH"].size())+"/"+fileName).c_str());
-					for (int i = 1; i < argList.size()+1; i++){
-						args[i] = strdup(argList[i-1].c_str());
+					for (int i = 1; i < command.size(); i++){
+						args[i] = strdup(command[i].c_str());
 					}
-					args[argList.size()+1] = NULL;
+					args[command.size()] = NULL;
 					pid_t p = fork();
 					if (p < 0){
 						fprintf(stderr, "fork Failed" );
-						return 1;
+						return 0;
 					}
 					else if (p == 0){
 						execv(args[0],args);
-					}	
-					else{
-						wait(&status);
-					}
-					return 1;
-				}		
-			}
-		}
-		closedir(dp);
-		printf("Error: command \"%s\" not found\n",cmd);
-	}
-	else{
-		int pos = std::string(cmd).rfind("/");
-		struct dirent *entry = nullptr;
-		DIR *dp = nullptr;
-		dp = opendir(std::string(cmd).substr(0,pos).c_str());
-		if (dp != nullptr) {
-			while ((entry = readdir(dp))){
-				std::string fileName = std::string(entry->d_name);
-				if(fileName.compare(std::string(cmd).substr(pos+1,std::string(cmd).size())) == 0){
-					int status;
-					char* args[argList.size()+2];
-					args[0] = cmd;
-					for (int i = 1; i < argList.size()+1; i++){
-						args[i] = strdup(argList[i-1].c_str());
-					}
-					args[argList.size()+1] = NULL;
-					pid_t p = fork();
-					if (p < 0){
-						fprintf(stderr, "fork Failed" );
-						return 1;
-					}
-					else if (p == 0){
-						execv(args[0],args);
+						exit(0);
 					}
 					else{
 						wait(&status);
@@ -313,7 +330,47 @@ int runOtherCommand(char* cmd){
 				}
 			}
 		}
-		printf("Error: command \"%s\" not found\n",cmd);
+		closedir(dp);
+		printf("Error: command \"%s\" not found\n",command[0].c_str());
 	}
-	return 1;
+	else{
+		int pos = command[0].rfind("/");
+		struct dirent *entry = nullptr;
+		DIR *dp = nullptr;
+		dp = opendir(command[0].substr(0,pos).c_str());
+		if (dp != nullptr) {
+			while ((entry = readdir(dp))){
+				std::string fileName = std::string(entry->d_name);
+				if(fileName.compare(command[0].substr(pos+1,command[0].size())) == 0){
+					int status;
+					char* args[command.size()+1];
+					for (int i = 0; i < command.size(); i++){
+						args[i] = strdup(command[i].c_str());
+					}
+					args[command.size()] = NULL;
+					pid_t p = fork();
+					if (p < 0){
+						fprintf(stderr, "fork Failed" );
+						return 0;
+					}
+					else if (p == 0){
+						execv(args[0],args);
+						exit(0);
+					}
+					else{
+						wait(&status);
+					}
+					return 1;
+				}
+			}
+		}
+		printf("Error: command \"%s\" not found\n",command[0].c_str());
+	}
+	return 0;
+}
+int runOtherCommand(){
+	executeCommand(commandList);
+	for (int i = 0; i < pipeList.size(); i++){
+		executeCommand(pipeList[i]);
+	}
 }
