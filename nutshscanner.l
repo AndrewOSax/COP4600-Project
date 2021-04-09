@@ -123,11 +123,21 @@ std::string wildCards(std::string input){
 std::string parseWords(char* text){
 	std::string input = std::string(text);
 	input = envExpand(input); //repalce all env fields
+	int pos = input.find_first_of(" \t");
+	if (pos == -1){
+		pos = input.size();
+	}
 	if (firstWord){ //alias if first word in command
-		auto iter = aliasTable.find(input);
-		if (iter != aliasTable.end()){
-			input = iter->second;
+		auto iter = aliasTable.find(input.substr(0,pos));
+		while (iter != aliasTable.end()){
+			input = input.replace(0,pos,iter->second);
+			int pos = input.find_first_of(" \t");
+			if (pos == -1){
+				pos = input.size();
+			}
+			iter = aliasTable.find(input.substr(0,pos));
 		}
+		firstWord = false;
 	}
 	return wildCards(input); //match wildcard characters
 }
@@ -161,30 +171,9 @@ CHAR [^ \t\n<>|\\&"]
 								}
 								free(yycopy);
 							 }
-							 else{				
-								firstWord = false;				
-								if (strcmp(yytext,"cd") == 0 && firstWord){
-									return CD;
-								}
-								else if(strcmp(yytext,"bye") == 0 && firstWord){
-									return BYE;
-								}
-								else if(strcmp(yytext,"setenv") == 0 && firstWord){
-									return SETENV;
-								}
-								else if(strcmp(yytext,"unsetenv") == 0 && firstWord){
-									return UNSETENV;
-								}
-								else if(strcmp(yytext,"alias") == 0 && firstWord){
-									return ALIAS;
-								}
-								else if(strcmp(yytext,"unalias") == 0 && firstWord){
-									return UNALIAS;
-								}
-								else{
-									yylval.string = strdup(yytext);
-									return WORD;
-								}								
+							 else{		
+								yylval.string = strdup(yytext);
+								return WORD;			
 							 }
 							 }
 <expect_string>[\"]	{ BEGIN(INITIAL);}
@@ -203,16 +192,9 @@ CHAR [^ \t\n<>|\\&"]
 "&" return AND;
 
 {WHITE}+ { }
-bye {if (firstWord){firstWord = false; return BYE;} else{yylval.string = strdup(yytext); return WORD;}}
-<<EOF>> {firstWord = false; printf("\n"); return BYE;}
-setenv {if (firstWord){firstWord = false; return SETENV;} else{yylval.string = strdup(yytext); return WORD;}}
-printenv {if (firstWord){firstWord = false; return PRINTENV;} else{yylval.string = strdup(yytext); return WORD;}}
-unsetenv {if (firstWord){firstWord = false; return UNSETENV;} else{yylval.string = strdup(yytext); return WORD;}}
-cd {if (firstWord){firstWord = false; return CD;} else{yylval.string = strdup(yytext); return WORD;}}
-alias {if (firstWord){firstWord = false; return ALIAS;} else{yylval.string = strdup(yytext); return WORD;}}
-unalias {if (firstWord){firstWord = false; return UNALIAS;} else{yylval.string = strdup(yytext); return WORD;}}
+<<EOF>> {printf("\n"); printf("Goodbye\n"); exit(1);}
 
-{META}	{firstWord = false; return META;}
+{META}	return META;
 
 {CHAR}+ {
 		 char* orig = strdup(yytext);
@@ -224,30 +206,9 @@ unalias {if (firstWord){firstWord = false; return UNALIAS;} else{yylval.string =
 			}
 			free(yycopy);
 		 }
-		 else{
-			firstWord = false;				
-			if (strcmp(yytext,"cd") == 0 && firstWord){
-				return CD;
-			}
-			else if(strcmp(yytext,"bye") == 0 && firstWord){
-				return BYE;
-			}
-			else if(strcmp(yytext,"setenv") == 0 && firstWord){
-				return SETENV;
-			}
-			else if(strcmp(yytext,"unsetenv") == 0 && firstWord){
-				return UNSETENV;
-			}
-			else if(strcmp(yytext,"alias") == 0 && firstWord){
-				return ALIAS;
-			}
-			else if(strcmp(yytext,"unalias") == 0 && firstWord){
-				return UNALIAS;
-			}
-			else{
-				yylval.string = strdup(yytext);
-				return WORD;
-			}	
+		 else{					
+			yylval.string = strdup(yytext);
+			return WORD;
 		 }
 		 }
 %%
