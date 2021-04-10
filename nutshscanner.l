@@ -192,9 +192,9 @@ CHAR [^ \t\n<>|\\&"]
 "&" return AND;
 
 {WHITE}+ { }
-<<EOF>> {printf("\n"); printf("Goodbye\n"); exit(1);}
+<<EOF>> {printf("\n"); exit(1);}
 
-{META}	return META;
+{META}	{ }
 
 {CHAR}+ {
 		 char* orig = strdup(yytext);
