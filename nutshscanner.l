@@ -3,6 +3,7 @@
 #include <string>
 #include "global.h"
 #include <dirent.h>
+#include <pwd.h>
 //#define unput(c) {yytchar= (c); if(yytchar=='\n') {yylineno--; *yysptr++=yytchar;}
 std::string envExpand(std::string input){
 	bool scanName = false;
@@ -141,6 +142,24 @@ std::string parseWords(char* text){
 	}
 	return wildCards(input); //match wildcard characters
 }
+std::string tildeExpand(std::string word){
+	if (word.substr(0,1).compare("~") == 0){
+		int pos = word.find("/");
+		if (pos == -1){
+			pos = word.size();
+		}
+		struct passwd* pw = getpwnam(word.substr(1,pos).c_str());
+		if (pw == nullptr){
+			return varTable["HOME"];
+		}
+		else{
+			return std::string(pw->pw_dir);
+		}
+	}
+	else{
+		return word;
+	}
+}
 //{DIGIT}+\.{DIGIT}+	{firstWord = false; return NUMBER_LITERAL;}
 //{DIGIT}+ {firstWord = false; return NUMBER_LITERAL;}
 //true|false	{firstWord = false; return BOOLEAN_LITERAL;}
@@ -207,7 +226,7 @@ CHAR [^ \t\n<>|\\&"]
 			free(yycopy);
 		 }
 		 else{					
-			yylval.string = strdup(yytext);
+			yylval.string = strdup(tildeExpand(std::string(yytext)).c_str());
 			return WORD;
 		 }
 		 }
