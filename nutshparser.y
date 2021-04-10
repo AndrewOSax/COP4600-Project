@@ -8,6 +8,8 @@
 #include <dirent.h>
 #include <vector>
 #include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 int yylex();
 int yyerror (char* s);
 int runCD(std::string dir);
@@ -18,7 +20,7 @@ int listAlias();
 int runALIAS(std::string name, std::string val);
 int runUNALIAS(std::string name);
 std::string pathExpand(std::string newPath);
-std::string firstExpand(std::string input, bool pathParsing);
+std::string firstExpand(std::string input, bool PATHParsing);
 int executeCommand(std::vector<std::string> &command);
 int runCommand();
 void clearOtherCommand();
@@ -95,9 +97,6 @@ int yyerror(char *s){
 
 int runCD(std::string dir){
 	dir = firstExpand(dir,false);
-	if (dir.compare("") == 0){
-		return 1;
-	}
 	if (dir[0] != '/') { // dir is relative path
 		std::string path = varTable["PWD"] + "/" + dir;
 		if(chdir(path.c_str()) == 0) {
@@ -108,7 +107,7 @@ int runCD(std::string dir){
 				aliasTable[".."] = varTable["PWD"].substr(0,found);
 			}
 			else{
-				aliasTable[".."] = "";
+				aliasTable[".."] = "/";
 			}
 		}
 		else{
@@ -125,7 +124,7 @@ int runCD(std::string dir){
 				aliasTable[".."] = varTable["PWD"].substr(0,found);
 			}
 			else{
-				aliasTable[".."] = "";
+				aliasTable[".."] = "/";
 			}
 		}
 		else{
@@ -135,18 +134,31 @@ int runCD(std::string dir){
 	}
 	return 1;
 }
-std::string firstExpand(std::string input,bool pathParsing){ //Tilde, dot, and dotdot expansion
+std::string firstExpand(std::string input,bool PATHParsing){ //Tilde, dot, and dotdot expansion
 	if (input.substr(0,1).compare("~") == 0){
 		std::string output = varTable["HOME"];
 		output += input.substr(1,input.size()-1);
 		return output;
 	}
-	else if (!pathParsing && input.substr(0,2).compare("..") == 0){
+	else if (!PATHParsing && input.substr(0,2).compare("..") == 0){
+		int count = 1;
+		while (3*count < input.size() && input.substr(3*count,2).compare("..") == 0){
+			count++;
+		}
 		std::string output = aliasTable[".."];
-		output += input.substr(2,input.size()-2);
+		for (int i = 1; i < count; i++){
+			int found = output.rfind("/");
+			if (found != -1){
+				output = output.substr(0,found);
+			}
+			else{
+				output = "/";
+			}
+		}		
+		output += input.substr(3*count-1,input.size());
 		return output;
 	}
-	else if (!pathParsing && input.substr(0,1).compare(".") == 0){
+	else if (!PATHParsing && input.substr(0,1).compare(".") == 0){
 		std::string output = aliasTable["."];
 		output += input.substr(1,input.size()-1);
 		return output;
@@ -237,6 +249,7 @@ int runUNALIAS(std::string name){
 	return 1;
 }
 int executeCommand(std::vector<std::string> &command){
+	
 	if (command[0].compare("bye") == 0){
 		exit(1);
 		return 1;
@@ -319,6 +332,12 @@ int executeCommand(std::vector<std::string> &command){
 							args[i] = strdup(command[i].c_str());
 						}
 						args[command.size()] = NULL;
+						struct stat path_stat;
+						stat(args[0],&path_stat);
+						if (!S_ISREG(path_stat.st_mode)){
+							fprintf(stderr,"Error: specified command is not a file!\n");
+							return 1;
+						}
 						pid_t p = fork();
 						if (p < 0){
 							fprintf(stderr, "fork() failed" );
@@ -351,6 +370,12 @@ int executeCommand(std::vector<std::string> &command){
 						args[i] = strdup(command[i].c_str());
 					}
 					args[command.size()] = NULL;
+					struct stat path_stat;
+					stat(args[0],&path_stat);
+					if (!S_ISREG(path_stat.st_mode)){
+						fprintf(stderr,"Error: specified command is not a file!\n");
+						return 1;
+					}
 					pid_t p = fork();
 					if (p < 0){
 						fprintf(stderr, "fork() failed" );
@@ -385,6 +410,12 @@ int executeCommand(std::vector<std::string> &command){
 						args[i] = strdup(command[i].c_str());
 					}
 					args[command.size()] = NULL;
+					struct stat path_stat;
+					stat(args[0],&path_stat);
+					if (!S_ISREG(path_stat.st_mode)){
+						fprintf(stderr,"Error: specified command is not a file!\n");
+						return 1;
+					}
 					pid_t p = fork();
 					if (p < 0){
 						fprintf(stderr, "fork() failed" );
