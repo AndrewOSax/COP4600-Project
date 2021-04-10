@@ -39,6 +39,7 @@ bool background;
 
 cmd_line:
 	command pipes pipein pipeout pipeerr wait NEWLINE {firstWord = true; runCommand(); clearOtherCommand(); return 1;}
+	| NEWLINE {firstWord = true; return 1;}
 	;
 command:
 	WORD args {commandList.insert(commandList.begin(),std::string($1));}
@@ -88,7 +89,7 @@ void clearOtherCommand(){
 	background = false;
 }
 int yyerror(char *s){
-	printf("%s\n",s);
+	fprintf(stderr,"%s\n",s);
 	return 0;
 }
 
@@ -111,7 +112,7 @@ int runCD(std::string dir){
 			}
 		}
 		else{
-			printf("Directory not found\n");
+			fprintf(stderr,"Error: directory not found.\n");
 			return 1;
 		}
 	}
@@ -128,24 +129,24 @@ int runCD(std::string dir){
 			}
 		}
 		else{
-			printf("Directory not found\n");
+			fprintf(stderr,"Error: directory not found.\n");
             return 1;
 		}
 	}
 	return 1;
 }
 std::string firstExpand(std::string input,bool pathParsing){ //Tilde, dot, and dotdot expansion
-	if (input.size() != 0 && input[0] == '~'){
+	if (input.substr(0,1).compare("~") == 0){
 		std::string output = varTable["HOME"];
 		output += input.substr(1,input.size()-1);
 		return output;
 	}
-	else if (!pathParsing && input.size() > 1 && input[0] == '.' && input[1] == '.'){
+	else if (!pathParsing && input.substr(0,2).compare("..") == 0){
 		std::string output = aliasTable[".."];
 		output += input.substr(2,input.size()-2);
 		return output;
 	}
-	else if (!pathParsing && input.size() != 0 && input[0] == '.'){
+	else if (!pathParsing && input.substr(0,1).compare(".") == 0){
 		std::string output = aliasTable["."];
 		output += input.substr(1,input.size()-1);
 		return output;
@@ -191,6 +192,7 @@ int runPRINTENV(){
 }
 int runUNSETENV(std::string var){
 	if (var.compare("PWD") == 0 || var.compare("HOME") == 0 || var.compare("PROMPT") == 0 || var.compare("PATH") == 0){
+		fprintf(stderr,"Error: cannot unset variable \"%s\".\n",var.c_str());
 		return 1;
 	}
 	varTable.erase(var);
@@ -198,20 +200,26 @@ int runUNSETENV(std::string var){
 }
 int listAlias(){
 	for (auto i = aliasTable.begin(); i != aliasTable.end(); i++) {
-		printf("%s=%s\n",i->first.c_str(),i->second.c_str());
+		if (i->first.compare(".") != 0 && i->first.compare("..") != 0){
+			fprintf(stdout,"%s=%s\n",i->first.c_str(),i->second.c_str());
+		}
 	}
 	return 1;
 }
 int runALIAS(std::string name, std::string val){
+	if (name.compare(".") == 0 || name.compare("..") == 0){
+		fprintf(stderr,"Error: cannot manually change alias \"%s\".\n",name.c_str());
+		return 1;
+	}
 	if(name.compare(val) == 0){
-		printf("Error, expansion of \"%s\" would create a loop.\n", name.c_str());
+		fprintf(stderr,"Error: expansion of \"%s\" would create a loop.\n", name.c_str());
 	}
 	else{
 		auto iter = aliasTable.find(val);
 		while (iter != aliasTable.end()){
 			std::string alias = iter->second;
 			if(name.compare(alias) == 0){
-				printf("Error, expansion of \"%s\" would create a loop.\n", name.c_str());
+				fprintf(stderr,"Error: expansion of \"%s\" would create a loop.\n", name.c_str());
 				return 1;
 			}
 			iter = aliasTable.find(alias);
@@ -221,12 +229,15 @@ int runALIAS(std::string name, std::string val){
 	return 1;
 }
 int runUNALIAS(std::string name){
+	if (name.compare(".") == 0 || name.compare("..") == 0){
+		fprintf(stderr,"Error: cannot unset alias \"%s\".\n",name.c_str());
+		return 1;
+	}
 	aliasTable.erase(name);
 	return 1;
 }
 int executeCommand(std::vector<std::string> &command){
 	if (command[0].compare("bye") == 0){
-		printf("Goodbye\n");
 		exit(1);
 		return 1;
 	}
@@ -238,7 +249,7 @@ int executeCommand(std::vector<std::string> &command){
 			runCD(command[1]);
 		}
 		else{
-			printf("Error, incorrect number of arguments for cd.\n");
+			fprintf(stderr,"Error: incorrect number of arguments for \"cd\".\n");
 		}		
 		return 1;
 	}
@@ -247,7 +258,7 @@ int executeCommand(std::vector<std::string> &command){
 			runSETENV(command[1],command[2]);
 		}
 		else{
-			printf("Error, incorrect number of arguments for setenv.\n");
+			fprintf(stderr,"Error: incorrect number of arguments for \"setenv\".\n");
 		}		
 		return 1;
 	}
@@ -256,7 +267,7 @@ int executeCommand(std::vector<std::string> &command){
 			runPRINTENV();
 		}
 		else{
-			printf("Error, incorrect number of arguments for printenv.\n");
+			fprintf(stderr,"Error: incorrect number of arguments for \"printenv\".\n");
 		}
 		return 1;
 	}
@@ -265,7 +276,7 @@ int executeCommand(std::vector<std::string> &command){
 			runUNSETENV(command[1]);
 		}
 		else{
-			printf("Error, incorrect number of arguments for unsetenv.\n");
+			fprintf(stderr,"Error: incorrect number of arguments for \"unsetenv\".\n");
 		}
 		return 1;
 	}
@@ -277,7 +288,7 @@ int executeCommand(std::vector<std::string> &command){
 			runALIAS(command[1],command[2]);
 		}
 		else{
-			printf("Error, incorrect number of arguments for alias.\n");
+			fprintf(stderr,"Error: incorrect number of arguments for \"alias\".\n");
 		}
 		return 1;
 	}
@@ -286,7 +297,7 @@ int executeCommand(std::vector<std::string> &command){
 			runUNALIAS(command[1]);
 		}
 		else{
-			printf("Error, incorrect number of arguments for unalias.\n");
+			fprintf(stderr,"Error: incorrect number of arguments for \"unalias\".\n");
 		}
 		return 1;
 	}
@@ -310,7 +321,7 @@ int executeCommand(std::vector<std::string> &command){
 						args[command.size()] = NULL;
 						pid_t p = fork();
 						if (p < 0){
-							fprintf(stderr, "fork Failed" );
+							fprintf(stderr, "fork() failed" );
 							return 1;
 						}
 						else if (p == 0){
@@ -342,7 +353,7 @@ int executeCommand(std::vector<std::string> &command){
 					args[command.size()] = NULL;
 					pid_t p = fork();
 					if (p < 0){
-						fprintf(stderr, "fork Failed" );
+						fprintf(stderr, "fork() failed" );
 						return 0;
 					}
 					else if (p == 0){
@@ -357,7 +368,7 @@ int executeCommand(std::vector<std::string> &command){
 			}
 		}
 		closedir(dp);
-		printf("Error: command \"%s\" not found\n",command[0].c_str());
+		fprintf(stderr,"Error: command \"%s\" not found.\n",command[0].c_str());
 	}
 	else{
 		int pos = command[0].rfind("/");
@@ -376,7 +387,7 @@ int executeCommand(std::vector<std::string> &command){
 					args[command.size()] = NULL;
 					pid_t p = fork();
 					if (p < 0){
-						fprintf(stderr, "fork Failed" );
+						fprintf(stderr, "fork() failed" );
 						return 0;
 					}
 					else if (p == 0){
@@ -390,7 +401,7 @@ int executeCommand(std::vector<std::string> &command){
 				}
 			}
 		}
-		printf("Error: command \"%s\" not found\n",command[0].c_str());
+		fprintf(stderr,"Error: command \"%s\" not found.\n",command[0].c_str());
 	}
 	return 1;
 }
