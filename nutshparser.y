@@ -8,8 +8,8 @@
 #include <dirent.h>
 #include <vector>
 #include <sys/wait.h>
-#include <sys/types.h>
-#include <sys/stat.h>
+#define READ_END 0
+#define WRITE_END 1
 int yylex();
 int yyerror (char* s);
 int runCD(std::string dir);
@@ -21,9 +21,9 @@ int runALIAS(std::string name, std::string val);
 int runUNALIAS(std::string name);
 std::string pathExpand(std::string newPath);
 std::string firstExpand(std::string input, bool PATHParsing);
-int executeCommand(std::vector<std::string> &command);
+int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout);
 int runCommand();
-void clearOtherCommand();
+void clearCommand();
 std::vector<std::string> commandList;
 std::vector<std::string> pipeCommandList;
 std::vector<std::vector<std::string>> pipeList;
@@ -32,6 +32,8 @@ std::string stdoutFile;
 bool stdoutAppend;
 std::string stderrFile;
 bool background;
+int pipeCount;
+int** fd;
 %}
 
 %union {char* string;}
@@ -40,7 +42,7 @@ bool background;
 %%
 
 cmd_line:
-	command pipes pipein pipeout pipeerr wait NEWLINE {firstWord = true; runCommand(); clearOtherCommand(); return 1;}
+	command pipes pipein pipeout pipeerr wait NEWLINE {firstWord = true; runCommand(); clearCommand(); return 1;}
 	| NEWLINE {firstWord = true; return 1;}
 	;
 command:
@@ -80,7 +82,7 @@ wait:
 	| AND {background = true;}
 	;
 %%
-void clearOtherCommand(){
+void clearCommand(){
 	commandList.clear();
 	pipeCommandList.clear();
 	pipeList.clear();
@@ -198,7 +200,7 @@ int runSETENV(std::string var, std::string val){
 }
 int runPRINTENV(){
 	for (auto i = varTable.begin(); i != varTable.end(); i++) {
-		printf("%s=%s\n",i->first.c_str(),i->second.c_str());
+		fprintf(stdout,"%s=%s\n",i->first.c_str(),i->second.c_str());
 	}
 	return 1;
 }
@@ -248,8 +250,7 @@ int runUNALIAS(std::string name){
 	aliasTable.erase(name);
 	return 1;
 }
-int executeCommand(std::vector<std::string> &command){
-	
+int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout){
 	if (command[0].compare("bye") == 0){
 		exit(1);
 		return 1;
@@ -332,24 +333,47 @@ int executeCommand(std::vector<std::string> &command){
 							args[i] = strdup(command[i].c_str());
 						}
 						args[command.size()] = NULL;
-						struct stat path_stat;
-						stat(args[0],&path_stat);
-						if (!S_ISREG(path_stat.st_mode)){
-							fprintf(stderr,"Error: specified command is not a file!\n");
-							return 1;
-						}
 						pid_t p = fork();
 						if (p < 0){
 							fprintf(stderr, "fork() failed" );
 							return 1;
 						}
 						else if (p == 0){
+							if (pipein != nullptr){
+								dup2(pipein[READ_END], STDIN_FILENO);
+								close(pipein[WRITE_END]);
+								close(pipein[READ_END]);
+							}
+							if (pipeout != nullptr){
+								dup2(pipeout[WRITE_END], STDOUT_FILENO);					
+								close(pipeout[READ_END]);
+								close(pipeout[WRITE_END]);
+							}
 							execv(args[0],args);
+							fprintf(stderr,"Error: failed to execute command \"%s\"\n",args[0]);
 							exit(0);
 						}
 						else{
-							wait(&status);
+							if (pipein != nullptr){
+								close(pipein[READ_END]);
+								close(pipein[WRITE_END]);
+							}
+							if (pipeout != nullptr){
+								if (pipeCount != pipeList.size()-1){
+									pipeCount++;
+									pipe(fd[pipeCount]);
+									executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+								}
+								else{
+									pipeCount++;
+									executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+								}								
+								close(pipeout[WRITE_END]);					
+								close(pipeout[READ_END]);
+							}
+							waitpid(p,&status,0);
 						}
+						closedir(dp);
 						return 1;
 					}
 				}
@@ -370,24 +394,47 @@ int executeCommand(std::vector<std::string> &command){
 						args[i] = strdup(command[i].c_str());
 					}
 					args[command.size()] = NULL;
-					struct stat path_stat;
-					stat(args[0],&path_stat);
-					if (!S_ISREG(path_stat.st_mode)){
-						fprintf(stderr,"Error: specified command is not a file!\n");
-						return 1;
-					}
 					pid_t p = fork();
 					if (p < 0){
 						fprintf(stderr, "fork() failed" );
-						return 0;
+						return 1;
 					}
 					else if (p == 0){
+						if (pipein != nullptr){
+							dup2(pipein[READ_END], STDIN_FILENO);
+							close(pipein[WRITE_END]);
+							close(pipein[READ_END]);
+						}
+						if (pipeout != nullptr){
+							dup2(pipeout[WRITE_END], STDOUT_FILENO);					
+							close(pipeout[READ_END]);
+							close(pipeout[WRITE_END]);
+						}
 						execv(args[0],args);
+						fprintf(stderr,"Error: failed to execute command \"%s\"\n",args[0]);
 						exit(0);
 					}
 					else{
-						wait(&status);
+						if (pipein != nullptr){
+							close(pipein[READ_END]);
+							close(pipein[WRITE_END]);
+						}
+						if (pipeout != nullptr){
+							if (pipeCount != pipeList.size()-1){
+								pipeCount++;
+								pipe(fd[pipeCount]);
+								executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+							}
+							else{
+								pipeCount++;
+								executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+							}	
+							close(pipeout[WRITE_END]);					
+							close(pipeout[READ_END]);
+						}
+						waitpid(p,&status,0);
 					}
+					closedir(dp);
 					return 1;
 				}
 			}
@@ -410,24 +457,47 @@ int executeCommand(std::vector<std::string> &command){
 						args[i] = strdup(command[i].c_str());
 					}
 					args[command.size()] = NULL;
-					struct stat path_stat;
-					stat(args[0],&path_stat);
-					if (!S_ISREG(path_stat.st_mode)){
-						fprintf(stderr,"Error: specified command is not a file!\n");
-						return 1;
-					}
 					pid_t p = fork();
 					if (p < 0){
 						fprintf(stderr, "fork() failed" );
-						return 0;
+						return 1;
 					}
 					else if (p == 0){
+						if (pipein != nullptr){
+							dup2(pipein[READ_END], STDIN_FILENO);
+							close(pipein[WRITE_END]);
+							close(pipein[READ_END]);
+						}
+						if (pipeout != nullptr){
+							dup2(pipeout[WRITE_END], STDOUT_FILENO);					
+							close(pipeout[READ_END]);
+							close(pipeout[WRITE_END]);
+						}
 						execv(args[0],args);
+						fprintf(stderr,"Error: failed to execute command \"%s\"\n",args[0]);
 						exit(0);
 					}
 					else{
-						wait(&status);
+						if (pipein != nullptr){
+							close(pipein[READ_END]);
+							close(pipein[WRITE_END]);
+						}
+						if (pipeout != nullptr){
+							if (pipeCount != pipeList.size()-1){
+								pipeCount++;
+								pipe(fd[pipeCount]);
+								executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+							}
+							else{
+								pipeCount++;
+								executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+							}	
+							close(pipeout[WRITE_END]);					
+							close(pipeout[READ_END]);
+						}
+						waitpid(p,&status,0);
 					}
+					closedir(dp);
 					return 1;
 				}
 			}
@@ -437,8 +507,16 @@ int executeCommand(std::vector<std::string> &command){
 	return 1;
 }
 int runCommand(){
-	executeCommand(commandList);
-	for (int i = 0; i < pipeList.size(); i++){
-		executeCommand(pipeList[i]);
+	if (pipeList.size() != 0){
+		fd = new int*[pipeList.size()];
+		for(int i = 0; i < pipeList.size(); i++){
+			fd[i] = new int[2];
+		}
+		pipeCount = 0;
+		pipe(fd[pipeCount]);
+		executeCommand(commandList,nullptr,fd[pipeCount]);
 	}
+	else{
+		executeCommand(commandList,nullptr,nullptr);
+	}		
 }
