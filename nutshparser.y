@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <vector>
 #include <sys/wait.h>
+#include<fcntl.h>
 #define READ_END 0
 #define WRITE_END 1
 int yylex();
@@ -27,13 +28,14 @@ void clearCommand();
 std::vector<std::string> commandList;
 std::vector<std::string> pipeCommandList;
 std::vector<std::vector<std::string>> pipeList;
-std::string stdinFile;
-std::string stdoutFile;
-bool stdoutAppend;
-std::string stderrFile;
+FILE* stdinFile;
+FILE* stdoutFile;
+FILE* stderrFile;
 bool background;
 int pipeCount;
 int** fd;
+void pipeChild(int* pipein, int* pipeout);
+void pipeParent(int* pipein, int* pipeout);
 %}
 
 %union {char* string;}
@@ -65,17 +67,17 @@ args_pipe:
 	;
 pipein:
 	%empty
-	| PIPE_IN WORD {stdinFile = std::string($2);}
+	| PIPE_IN WORD {stdinFile = fopen($2,"r");}
 	;
 pipeout:
 	%empty
-	| PIPE_OUT WORD {stdoutFile = std::string($2); stdoutAppend = false;}
-	| PIPE_OUT_OUT WORD {stdoutFile = std::string($2); stdoutAppend = true;}
+	| PIPE_OUT WORD {stdoutFile = fopen($2,"w");}
+	| PIPE_OUT_OUT WORD {stdoutFile = fopen($2,"a");}
 	;
 pipeerr:
 	%empty
-	| PIPE_ERR WORD {stderrFile = std::string($2);}
-	| PIPE_ERR_OUT {stderrFile = "STDOUT";}
+	| PIPE_ERR WORD {stderrFile = fopen($2,"a");}
+	| PIPE_ERR_OUT {stderrFile = stdoutFile;}
 	;
 wait:
 	%empty
@@ -86,10 +88,18 @@ void clearCommand(){
 	commandList.clear();
 	pipeCommandList.clear();
 	pipeList.clear();
-	stdinFile.clear();
-	stdoutFile.clear();
-	stderrFile.clear();
-	stdoutAppend = false;
+	if (stdinFile != nullptr){
+		fclose(stdinFile);
+		stdinFile = nullptr;
+	}
+	if (stdoutFile != nullptr){
+		fclose(stdoutFile);
+		stdoutFile = nullptr;
+	}
+	if (stderrFile != nullptr){
+		fclose(stderrFile);
+		stderrFile = nullptr;
+	}
 	background = false;
 }
 int yyerror(char *s){
@@ -250,6 +260,43 @@ int runUNALIAS(std::string name){
 	aliasTable.erase(name);
 	return 1;
 }
+void pipeChild(int* pipein, int* pipeout){
+	if (pipein != nullptr){
+		dup2(pipein[READ_END], STDIN_FILENO);
+		close(pipein[WRITE_END]);
+		close(pipein[READ_END]);
+	}
+	else if (stdinFile != nullptr){					
+		dup2(fileno(stdinFile),STDIN_FILENO);
+	}
+	if (pipeout != nullptr){
+		dup2(pipeout[WRITE_END], STDOUT_FILENO);					
+		close(pipeout[READ_END]);
+		close(pipeout[WRITE_END]);
+	}
+	else if (stdoutFile != nullptr){					
+		dup2(fileno(stdoutFile),STDOUT_FILENO);
+	}
+}
+void pipeParent(int* pipein, int* pipeout){
+	if (pipein != nullptr){
+		close(pipein[READ_END]);
+		close(pipein[WRITE_END]);
+	}
+	if (pipeout != nullptr){
+		if (pipeCount != pipeList.size()-1){
+			pipeCount++;
+			pipe(fd[pipeCount]);
+			executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+		}
+		else{
+			pipeCount++;
+			executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+		}	
+		close(pipeout[WRITE_END]);					
+		close(pipeout[READ_END]);
+	}
+}
 int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout){
 	if (command[0].compare("bye") == 0){
 		exit(1);
@@ -257,9 +304,17 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 	}
 	else if (command[0].compare("cd") == 0){
 		if (command.size() == 1){
+			if (pipein != nullptr){
+				close(pipein[READ_END]);
+				close(pipein[WRITE_END]);
+			}
 			runCD(varTable["HOME"]);
 		}
 		else if (command.size() == 2){
+			if (pipein != nullptr){
+				close(pipein[READ_END]);
+				close(pipein[WRITE_END]);
+			}
 			runCD(command[1]);
 		}
 		else{
@@ -269,6 +324,10 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 	}
 	else if (command[0].compare("setenv") == 0){
 		if (command.size() == 3){
+			if (pipein != nullptr){
+				close(pipein[READ_END]);
+				close(pipein[WRITE_END]);
+			}
 			runSETENV(command[1],command[2]);
 		}
 		else{
@@ -276,9 +335,20 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 		}		
 		return 1;
 	}
-	else if (command[0].compare("printenv") == 0){
+	else if (command[0].compare("printenv") == 0){		
 		if (command.size() == 1){
+			if (pipein != nullptr){
+				close(pipein[READ_END]);
+				close(pipein[WRITE_END]);
+			}
+			int orig = dup(STDOUT_FILENO);
+			if (pipeout == nullptr && stdoutFile != nullptr){					
+				dup2(fileno(stdoutFile),STDOUT_FILENO);
+			}			
 			runPRINTENV();
+			if (pipeout == nullptr && stdoutFile != nullptr){
+				dup2(orig,STDOUT_FILENO);
+			}
 		}
 		else{
 			fprintf(stderr,"Error: incorrect number of arguments for \"printenv\".\n");
@@ -287,6 +357,10 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 	}
 	else if (command[0].compare("unsetenv") == 0){
 		if (command.size() == 2){
+			if (pipein != nullptr){
+				close(pipein[READ_END]);
+				close(pipein[WRITE_END]);
+			}
 			runUNSETENV(command[1]);
 		}
 		else{
@@ -296,7 +370,18 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 	}
 	else if (command[0].compare("alias") == 0){
 		if (command.size() == 1){
+			if (pipein != nullptr){
+				close(pipein[READ_END]);
+				close(pipein[WRITE_END]);
+			}
+			int orig = dup(STDOUT_FILENO);
+			if (pipeout == nullptr && stdoutFile != nullptr){					
+				dup2(fileno(stdoutFile),STDOUT_FILENO);
+			}			
 			listAlias();
+			if (pipeout == nullptr && stdoutFile != nullptr){
+				dup2(orig,STDOUT_FILENO);
+			}
 		}
 		else if (command.size() == 3){
 			runALIAS(command[1],command[2]);
@@ -308,6 +393,10 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 	}
 	else if (command[0].compare("unalias") == 0){
 		if (command.size() == 2){
+			if (pipein != nullptr){
+				close(pipein[READ_END]);
+				close(pipein[WRITE_END]);
+			}
 			runUNALIAS(command[1]);
 		}
 		else{
@@ -315,7 +404,7 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 		}
 		return 1;
 	}
-	if (command[0][0] != '/') { // cmd is relative path
+	else if (command[0][0] != '/') { // cmd is relative path
 		struct dirent *entry = nullptr;
 		DIR *dp = nullptr;
 		int oldPos = 0;
@@ -339,38 +428,13 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 							return 1;
 						}
 						else if (p == 0){
-							if (pipein != nullptr){
-								dup2(pipein[READ_END], STDIN_FILENO);
-								close(pipein[WRITE_END]);
-								close(pipein[READ_END]);
-							}
-							if (pipeout != nullptr){
-								dup2(pipeout[WRITE_END], STDOUT_FILENO);					
-								close(pipeout[READ_END]);
-								close(pipeout[WRITE_END]);
-							}
+							pipeChild(pipein,pipeout);
 							execv(args[0],args);
 							fprintf(stderr,"Error: failed to execute command \"%s\"\n",args[0]);
 							exit(0);
 						}
 						else{
-							if (pipein != nullptr){
-								close(pipein[READ_END]);
-								close(pipein[WRITE_END]);
-							}
-							if (pipeout != nullptr){
-								if (pipeCount != pipeList.size()-1){
-									pipeCount++;
-									pipe(fd[pipeCount]);
-									executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
-								}
-								else{
-									pipeCount++;
-									executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
-								}								
-								close(pipeout[WRITE_END]);					
-								close(pipeout[READ_END]);
-							}
+							pipeParent(pipein,pipeout);
 							waitpid(p,&status,0);
 						}
 						closedir(dp);
@@ -400,38 +464,13 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 						return 1;
 					}
 					else if (p == 0){
-						if (pipein != nullptr){
-							dup2(pipein[READ_END], STDIN_FILENO);
-							close(pipein[WRITE_END]);
-							close(pipein[READ_END]);
-						}
-						if (pipeout != nullptr){
-							dup2(pipeout[WRITE_END], STDOUT_FILENO);					
-							close(pipeout[READ_END]);
-							close(pipeout[WRITE_END]);
-						}
+						pipeChild(pipein,pipeout);
 						execv(args[0],args);
 						fprintf(stderr,"Error: failed to execute command \"%s\"\n",args[0]);
 						exit(0);
 					}
 					else{
-						if (pipein != nullptr){
-							close(pipein[READ_END]);
-							close(pipein[WRITE_END]);
-						}
-						if (pipeout != nullptr){
-							if (pipeCount != pipeList.size()-1){
-								pipeCount++;
-								pipe(fd[pipeCount]);
-								executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
-							}
-							else{
-								pipeCount++;
-								executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
-							}	
-							close(pipeout[WRITE_END]);					
-							close(pipeout[READ_END]);
-						}
+						pipeParent(pipein,pipeout);
 						waitpid(p,&status,0);
 					}
 					closedir(dp);
@@ -463,38 +502,13 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 						return 1;
 					}
 					else if (p == 0){
-						if (pipein != nullptr){
-							dup2(pipein[READ_END], STDIN_FILENO);
-							close(pipein[WRITE_END]);
-							close(pipein[READ_END]);
-						}
-						if (pipeout != nullptr){
-							dup2(pipeout[WRITE_END], STDOUT_FILENO);					
-							close(pipeout[READ_END]);
-							close(pipeout[WRITE_END]);
-						}
+						pipeChild(pipein,pipeout);
 						execv(args[0],args);
 						fprintf(stderr,"Error: failed to execute command \"%s\"\n",args[0]);
 						exit(0);
 					}
 					else{
-						if (pipein != nullptr){
-							close(pipein[READ_END]);
-							close(pipein[WRITE_END]);
-						}
-						if (pipeout != nullptr){
-							if (pipeCount != pipeList.size()-1){
-								pipeCount++;
-								pipe(fd[pipeCount]);
-								executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
-							}
-							else{
-								pipeCount++;
-								executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
-							}	
-							close(pipeout[WRITE_END]);					
-							close(pipeout[READ_END]);
-						}
+						pipeParent(pipein,pipeout);
 						waitpid(p,&status,0);
 					}
 					closedir(dp);
@@ -507,6 +521,9 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 	return 1;
 }
 int runCommand(){
+	if (stderrFile != nullptr){						
+		dup2(fileno(stderrFile),STDERR_FILENO);
+	}
 	if (pipeList.size() != 0){
 		fd = new int*[pipeList.size()];
 		for(int i = 0; i < pipeList.size(); i++){
@@ -518,5 +535,5 @@ int runCommand(){
 	}
 	else{
 		executeCommand(commandList,nullptr,nullptr);
-	}		
+	}
 }
