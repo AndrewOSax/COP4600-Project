@@ -174,7 +174,6 @@ DIGIT	[0-9]
 META [<>|\\&]
 
 WHITE [ \t]
-NL "\n"
 
 ANYCHAR [^\"]
 CHAR [^ \t\n<>|\\&"]
@@ -200,7 +199,7 @@ CHAR [^ \t\n<>|\\&"]
 ~ {firstWord = false; yylval.string = strdup(varTable["HOME"].c_str()); return WORD;}
 ".." {firstWord = false; yylval.string = strdup(aliasTable[".."].c_str()); return WORD;}
 "." {firstWord = false; yylval.string = strdup(aliasTable["."].c_str()); return WORD;}
-{NL}	return NEWLINE;
+"\n"	return NEWLINE;
 
 "|" return BASIC_PIPE;
 "<" return PIPE_IN;
@@ -212,8 +211,6 @@ CHAR [^ \t\n<>|\\&"]
 
 {WHITE}+ { }
 <<EOF>> {printf("\n"); exit(1);}
-
-{META}	{ }
 
 {CHAR}+ {
 		 char* orig = strdup(yytext);
