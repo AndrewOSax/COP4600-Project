@@ -76,7 +76,7 @@ pipeout:
 	;
 pipeerr:
 	%empty
-	| PIPE_ERR WORD {stderrFile = fopen($2,"a");}
+	| PIPE_ERR WORD {stderrFile = fopen($2,"w");}
 	| PIPE_ERR_OUT {stderrFile = stdoutFile;}
 	;
 wait:
@@ -92,14 +92,21 @@ void clearCommand(){
 		fclose(stdinFile);
 		stdinFile = nullptr;
 	}
-	if (stdoutFile != nullptr){
+	if (stdoutFile != nullptr && stderrFile != nullptr && stdoutFile == stderrFile){
 		fclose(stdoutFile);
 		stdoutFile = nullptr;
-	}
-	if (stderrFile != nullptr){
-		fclose(stderrFile);
 		stderrFile = nullptr;
 	}
+	else{
+		if (stdoutFile != nullptr){
+			fclose(stdoutFile);
+			stdoutFile = nullptr;
+		}
+		if (stderrFile != nullptr){
+			fclose(stderrFile);
+			stderrFile = nullptr;
+		}
+	}	
 	background = false;
 }
 int yyerror(char *s){
@@ -298,6 +305,7 @@ void pipeParent(int* pipein, int* pipeout){
 	}
 }
 int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout){
+	command[0] = firstExpand(command[0],false);
 	if (command[0].compare("bye") == 0){
 		exit(1);
 		return 1;
@@ -435,7 +443,9 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 						}
 						else{
 							pipeParent(pipein,pipeout);
-							waitpid(p,&status,0);
+							if (!background){
+								waitpid(p,&status,0);
+							}
 						}
 						closedir(dp);
 						return 1;
@@ -471,7 +481,9 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 					}
 					else{
 						pipeParent(pipein,pipeout);
-						waitpid(p,&status,0);
+						if (!background){
+							waitpid(p,&status,0);
+						}
 					}
 					closedir(dp);
 					return 1;
@@ -509,7 +521,9 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 					}
 					else{
 						pipeParent(pipein,pipeout);
-						waitpid(p,&status,0);
+						if (!background){
+							waitpid(p,&status,0);
+						}
 					}
 					closedir(dp);
 					return 1;
