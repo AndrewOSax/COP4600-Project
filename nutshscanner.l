@@ -196,7 +196,7 @@ CHAR [^ \t\n<>|\\&"]
 							 }
 <expect_string>[\"]	{ BEGIN(INITIAL);}
 
-~ {firstWord = false; yylval.string = strdup(varTable["HOME"].c_str()); return WORD;}
+"~" {firstWord = false; yylval.string = strdup(varTable["HOME"].c_str()); return WORD;}
 ".." {firstWord = false; yylval.string = strdup(aliasTable[".."].c_str()); return WORD;}
 "." {firstWord = false; yylval.string = strdup(aliasTable["."].c_str()); return WORD;}
 "\n"	return NEWLINE;
@@ -208,6 +208,8 @@ CHAR [^ \t\n<>|\\&"]
 "2>&1" return PIPE_ERR_OUT;
 ">" return PIPE_OUT;
 "&" return AND;
+
+{META} { }
 
 {WHITE}+ { }
 <<EOF>> {printf("\n"); exit(1);}
