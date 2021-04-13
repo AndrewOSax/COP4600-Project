@@ -30,13 +30,14 @@ void init(){
 	}
 	
 	firstWord = true;
-    system("clear");
 };
 
-int main(){
+int main(int argc, char** argv){
 	init();
-	while(1){
-        printf("[%s]@%s>> ", varTable["PROMPT"].c_str(), varTable["PWD"].c_str());
+	while(true){
+		if (isatty(STDIN_FILENO)){
+			fprintf(stdout,"\033[0;32m[%s]\033[0m@\033[0;35m%s\033[0m>> ", varTable["PROMPT"].c_str(), varTable["PWD"].c_str());
+		}
         yyparse();
     }
 	return 0;
