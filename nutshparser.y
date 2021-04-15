@@ -317,6 +317,21 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 				close(pipein[WRITE_END]);
 			}
 			runCD(varTable["HOME"]);
+			if (pipeout != nullptr){
+				close(pipeout[READ_END]);
+				close(pipeout[WRITE_END]);
+				if (pipeCount != pipeList.size()-1){
+					pipeCount++;
+					pipe(fd[pipeCount]);
+					executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+				}
+				else{
+					pipeCount++;
+					executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+				}	
+				close(pipeout[WRITE_END]);					
+				close(pipeout[READ_END]);
+			}
 		}
 		else if (command.size() == 2){
 			if (pipein != nullptr){
@@ -324,6 +339,21 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 				close(pipein[WRITE_END]);
 			}
 			runCD(command[1]);
+			if (pipeout != nullptr){
+				close(pipeout[READ_END]);
+				close(pipeout[WRITE_END]);
+				if (pipeCount != pipeList.size()-1){
+					pipeCount++;
+					pipe(fd[pipeCount]);
+					executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+				}
+				else{
+					pipeCount++;
+					executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+				}	
+				close(pipeout[WRITE_END]);					
+				close(pipeout[READ_END]);
+			}
 		}
 		else{
 			fprintf(stderr,"Error: incorrect number of arguments for \"cd\".\n");
@@ -337,6 +367,21 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 				close(pipein[WRITE_END]);
 			}
 			runSETENV(command[1],command[2]);
+			if (pipeout != nullptr){
+				close(pipeout[READ_END]);
+				close(pipeout[WRITE_END]);
+				if (pipeCount != pipeList.size()-1){
+					pipeCount++;
+					pipe(fd[pipeCount]);
+					executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+				}
+				else{
+					pipeCount++;
+					executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+				}	
+				close(pipeout[WRITE_END]);					
+				close(pipeout[READ_END]);
+			}
 		}
 		else{
 			fprintf(stderr,"Error: incorrect number of arguments for \"setenv\".\n");
@@ -350,11 +395,29 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 				close(pipein[WRITE_END]);
 			}
 			int orig = dup(STDOUT_FILENO);
-			if (pipeout == nullptr && stdoutFile != nullptr){					
+			if (pipeout != nullptr){
+				dup2(pipeout[WRITE_END],STDOUT_FILENO);
+				close(pipeout[READ_END]);
+				close(pipeout[WRITE_END]);
+			}
+			else if (stdoutFile != nullptr){					
 				dup2(fileno(stdoutFile),STDOUT_FILENO);
-			}			
+			}		
 			runPRINTENV();
-			if (pipeout == nullptr && stdoutFile != nullptr){
+			if (pipeout != nullptr){
+				if (pipeCount != pipeList.size()-1){
+					pipeCount++;
+					pipe(fd[pipeCount]);
+					executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+				}
+				else{
+					pipeCount++;
+					executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+				}	
+				close(pipeout[WRITE_END]);					
+				close(pipeout[READ_END]);
+			}
+			else if (stdoutFile != nullptr){
 				dup2(orig,STDOUT_FILENO);
 			}
 		}
@@ -370,6 +433,21 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 				close(pipein[WRITE_END]);
 			}
 			runUNSETENV(command[1]);
+			if (pipeout != nullptr){
+				close(pipeout[READ_END]);
+				close(pipeout[WRITE_END]);
+				if (pipeCount != pipeList.size()-1){
+					pipeCount++;
+					pipe(fd[pipeCount]);
+					executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+				}
+				else{
+					pipeCount++;
+					executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+				}	
+				close(pipeout[WRITE_END]);					
+				close(pipeout[READ_END]);
+			}
 		}
 		else{
 			fprintf(stderr,"Error: incorrect number of arguments for \"unsetenv\".\n");
@@ -383,16 +461,53 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 				close(pipein[WRITE_END]);
 			}
 			int orig = dup(STDOUT_FILENO);
-			if (pipeout == nullptr && stdoutFile != nullptr){					
+			if (pipeout != nullptr){
+				dup2(pipeout[WRITE_END],STDOUT_FILENO);
+				close(pipeout[READ_END]);
+				close(pipeout[WRITE_END]);
+			}
+			else if (stdoutFile != nullptr){					
 				dup2(fileno(stdoutFile),STDOUT_FILENO);
-			}			
+			}		
 			listAlias();
-			if (pipeout == nullptr && stdoutFile != nullptr){
+			if (pipeout != nullptr){
+				if (pipeCount != pipeList.size()-1){
+					pipeCount++;
+					pipe(fd[pipeCount]);
+					executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+				}
+				else{
+					pipeCount++;
+					executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+				}	
+				close(pipeout[WRITE_END]);					
+				close(pipeout[READ_END]);
+			}
+			else if (stdoutFile != nullptr){
 				dup2(orig,STDOUT_FILENO);
 			}
 		}
 		else if (command.size() == 3){
+			if (pipein != nullptr){
+				close(pipein[READ_END]);
+				close(pipein[WRITE_END]);
+			}
 			runALIAS(command[1],command[2]);
+			if (pipeout != nullptr){
+				close(pipeout[READ_END]);
+				close(pipeout[WRITE_END]);
+				if (pipeCount != pipeList.size()-1){
+					pipeCount++;
+					pipe(fd[pipeCount]);
+					executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+				}
+				else{
+					pipeCount++;
+					executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+				}	
+				close(pipeout[WRITE_END]);					
+				close(pipeout[READ_END]);
+			}
 		}
 		else{
 			fprintf(stderr,"Error: incorrect number of arguments for \"alias\".\n");
@@ -406,6 +521,21 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 				close(pipein[WRITE_END]);
 			}
 			runUNALIAS(command[1]);
+			if (pipeout != nullptr){
+				close(pipeout[READ_END]);
+				close(pipeout[WRITE_END]);
+				if (pipeCount != pipeList.size()-1){
+					pipeCount++;
+					pipe(fd[pipeCount]);
+					executeCommand(pipeList[pipeCount-1],pipeout,fd[pipeCount]);
+				}
+				else{
+					pipeCount++;
+					executeCommand(pipeList[pipeCount-1],pipeout,nullptr);
+				}	
+				close(pipeout[WRITE_END]);					
+				close(pipeout[READ_END]);
+			}
 		}
 		else{
 			fprintf(stderr,"Error: incorrect number of arguments for \"unalias\".\n");
@@ -535,6 +665,9 @@ int executeCommand(std::vector<std::string> &command, int* pipein, int* pipeout)
 	return 1;
 }
 int runCommand(){
+	int origin = dup(STDIN_FILENO);
+	int origout = dup(STDOUT_FILENO);
+	int origerr = dup(STDERR_FILENO);
 	if (stderrFile != nullptr){						
 		dup2(fileno(stderrFile),STDERR_FILENO);
 	}
@@ -550,4 +683,7 @@ int runCommand(){
 	else{
 		executeCommand(commandList,nullptr,nullptr);
 	}
+	dup2(origin,STDIN_FILENO);
+	dup2(origout,STDOUT_FILENO);
+	dup2(origerr,STDERR_FILENO);
 }
